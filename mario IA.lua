@@ -1,6 +1,18 @@
 -- MARIO IA par LAUPOK
 -- script à utiliser avec l'emu bizhawk et une rom USA de Super Mario World récupéré totalement légalement 
 
+-- correction MAJ 1 ATTENTION 
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-- !!  LES ANCIENNES SAUVEGARDES NE SONT PLUS COMPATIBLES  !!
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+--		1- probleme de crossover (les connexions non actives du nul étaient copiées, pas bonne idée)
+--		2- petit probleme quand sauvegarde de la population finie; si le plus fort avait déjà fini le niveau, 
+--			les autres individus de la population, meme ceux n'ayant jamais fini le niveau, 
+--			était sauvegardé et testé. Là les autres individus de la popualtion sont quand même sauvegardé, 
+--			mais plus testé dans le jeu. Mario finira en boucle le niveau une fois terminé.
+--		3- tjrs en rapport avec la sauvegarde, suppression de la sauvegarde de la valeur du neurone, vu que c'est reset à toutes les frames on s'en fou
+--		4- modif fitnessmax à la fin du niveau (plus ajouté mais ==) 
+--		5- augmentation des chances de mutation de neurone (il se peut que ça soit une mauvaise idée mais le bug du crossover que j'ai corrigé rendaient les neurones moins utiles')
 
 -- constantes
 NOM_JEU = "Super Mario World (USA)"
@@ -8,6 +20,7 @@ NOM_SAVESTATE = "debut.state"
 NOM_FICHIER_POPULATION = "gen idGen.pop" -- idGen sera remplacé par le nb de gen
 TAILLE_FORM_W = 380 
 TAILLE_FORM_H = 385 
+
 TAILLE_TILE = 16 -- taille d'une tile DANS LE JEU
 TAILLE_VUE_W = TAILLE_TILE * 11 -- taille de ce que je vois le script
 TAILLE_VUE_H = TAILLE_TILE * 9 
@@ -30,7 +43,7 @@ ENCRAGE_Y_OUTPUT = 50
 ESPACE_Y_OUTPUT = TAILLE_OUTPUT_H + 5 -- entre chaque output l'espace qu'il y a 
 NB_HIDDEN_PAR_LIGNE = 10 -- nombre de neurone hidden par ligne (affichage uniquement)
 
-FITNESS_LEVEL_FINI = 1000000 -- quand le level est fini, ça rajoute ça 
+FITNESS_LEVEL_FINI = 1000000 -- quand le level est fini, la fitness devient ça
 NB_FRAME_RESET_BASE = 33 -- si pendant x frames la fitness n'augmente pas comparé à celle du début, on relance (le jeu tourne à 30 fps au cas où)
 NB_FRAME_RESET_PROGRES = 300 -- si il a eu un progrés (diff de la fitness au lancement) on laisse le jeu tourner un peu + longtemps avant le reset
 NB_NEURONE_MAX = 100000 -- pour le reseau de neurone, hors input et output
@@ -46,7 +59,7 @@ CHANCE_MUTATION_RESET_CONNEXION = 0.25 -- % de chance que le poids de la connexi
 POIDS_CONNEXION_MUTATION_AJOUT = 0.80 -- poids ajouté à la mutation de la connexion si pas CHANCE_MUTATION_RESET_CONNEXION. La valeur peut être passée negative
 CHANCE_MUTATION_POIDS = 0.95
 CHANCE_MUTATION_CONNEXION = 0.85
-CHANCE_MUTATION_NEURONE = 0.25
+CHANCE_MUTATION_NEURONE = 0.39
 
 
 -- doit correspondre aux inputs de la manette dans l'emulateur
@@ -490,8 +503,9 @@ function crossover(unReseau1, unReseau2)
 	-- sauf pour les connexions où y a une chance que le nul lui donne ses genes
 	for i = 1, #leReseau.lesConnexions, 1 do
 		for j = 1, #leNul.lesConnexions, 1 do
-			-- si 2 connexions partagent la meme innovation, la connexion du nul peut venir la remplacer
-			if leReseau.lesConnexions[i].innovation == leNul.lesConnexions[j].innovation then
+			-- si 2 connexions partagent la meme innovation, la connexion du nul peut venir la remplacer 
+			-- *seulement si nul est actif, sans ça ça créé des neurones hiddens inutiles*
+			if leReseau.lesConnexions[i].innovation == leNul.lesConnexions[j].innovation and leNul.lesConnexions[j].actif then
 				if math.random() > 0.5 then
 					leReseau.lesConnexions[i] = leNul.lesConnexions[j]
 				end
@@ -602,7 +616,7 @@ function nouvelleGeneration(laPopulation, lesEspeces)
 	end
 
 	-- si le level a été terminé au moins une fois, tous les individus deviennent le meilleur, on ne recherche plus de mutation là
-	if leMeilleur.fitness > FITNESS_LEVEL_FINI then
+	if leMeilleur.fitness == FITNESS_LEVEL_FINI then
 		for i = 1, #lesEspeces, 1 do
 			for j = 1, #lesEspeces[i].lesReseaux, 1 do
 				lesEspeces[i].lesReseaux[j] = copier(leMeilleur)
@@ -635,7 +649,7 @@ function nouvelleGeneration(laPopulation, lesEspeces)
 			local unReseau = crossover(choisirParent(lesEspeces[i].lesReseaux), choisirParent(lesEspeces[i].lesReseaux))
 			
 			-- on stop la mutation à ce stade
-			if fitnessMoyenneGlobal < FITNESS_LEVEL_FINI then
+			if fitnessMoyenneGlobal ~= FITNESS_LEVEL_FINI then
 				mutation(unReseau)
 			end
 
@@ -691,7 +705,7 @@ function sauvegarderPopulation(laPopulation, estFini)
 			lePlusFort = copier(laPopulation[i])
 		end
 	end
-	-- check ausis dans l'ancienne population (si plus fort, il ne peut etre que là)
+	-- check aussi dans l'ancienne population (si plus fort, il ne peut etre que là)
 	if #lesAnciennesPopulation > 0 then
 		for i = 1, #lesAnciennesPopulation, 1 do
 			for j = 1, #lesAnciennesPopulation[i], 1 do
@@ -738,6 +752,12 @@ function chargerPopulation(chemin)
 
 		console.log("plus fort charge")
 		console.log(lesAnciennesPopulation[1][1])
+		-- si le plus fort a fini le niveau, tous les individus de la population deviennent le plus fort
+		if lesAnciennesPopulation[1][1].fitness == FITNESS_LEVEL_FINI then
+			for i = 1, NB_INDIVIDU_POPULATION, 1 do
+				laPopulation[i] = copier(lesAnciennesPopulation[1][1])
+			end
+		end
 		io.close(fichier)
 		console.log("chargement termine de " .. chemin)
 	end
@@ -753,8 +773,8 @@ function sauvegarderUnReseau(unReseau, fichier)
 	for i = 1, unReseau.nbNeurone, 1 do
 		local indice = NB_INPUT + NB_OUTPUT + i
 		-- pas besoin d'écrire le type, je ne sauvegarde que les hiddens
-		io.write(unReseau.lesNeurones[indice].id .. "\n" .. 
-			unReseau.lesNeurones[indice].valeur .. "\n")
+		-- *non plus la valeur, car c'est reset toutes les frames en fait
+		io.write(unReseau.lesNeurones[indice].id .. "\n")
 	end
 	for i = 1, #unReseau.lesConnexions, 1 do
 		-- obligé car actif est un bool
@@ -782,7 +802,7 @@ function chargerUnReseau(fichier)
 	for i = 1, nbNeurone, 1 do
 		local neurone = newNeurone()
 		neurone.id = io.read("*number")
-		neurone.valeur = io.read("*number")
+		neurone.valeur = 0
 		neurone.type = "hidden"
 		
 		table.insert(unReseau.lesNeurones, neurone)
@@ -813,15 +833,16 @@ end
 -- mets à jour un réseau de neurone avec ce qu'il y a a l'écran. A appeler à chaque frame quand on en test un reseau
 function majReseau(unReseau, marioBase)
 	local mario = getPositionMario()
-	if marioBase.x < mario.x then
-		unReseau.fitness = unReseau.fitness + (mario.x - marioBase.x)
-		marioBase.x = mario.x
-	end
+	
 
 	-- niveau fini ?
 	if not niveauFini and memory.readbyte(0x0100) == 12 then
-		unReseau.fitness = unReseau.fitness + FITNESS_LEVEL_FINI -- comme ça l'espece de cette population va dominer les autres
+		unReseau.fitness = FITNESS_LEVEL_FINI -- comme ça l'espece de cette population va dominer les autres
 		niveauFini = true
+	-- sinon augmentation de la fitness classique (quand mario va à gauche)
+	elseif marioBase.x < mario.x then
+		unReseau.fitness = unReseau.fitness + (mario.x - marioBase.x)
+		marioBase.x = mario.x
 	end
 
 	-- mise à jour des inputs
@@ -846,7 +867,7 @@ function getLesInputs()
 			lesInputs[getIndiceLesInputs(i, j)] = 0
 		end
 	end
-
+	
 	local lesSprites = getLesSprites()
 	for i = 1, #lesSprites, 1 do
 		local input = convertirPositionPourInput(getLesSprites()[i])
@@ -855,13 +876,14 @@ function getLesInputs()
 		end
 	end
 
+	
 
 	local lesTiles = getLesTiles()
 	for i = 1, NB_TILE_W, 1 do
 		for j = 1, NB_TILE_H, 1 do
 			local indice = getIndiceLesInputs(i, j)
 			if lesTiles[indice] ~= 0 then
-				lesInputs[indice] = 1
+				lesInputs[indice] = lesTiles[indice]
 			end
 		end
 	end
@@ -916,6 +938,7 @@ function getLesTiles()
 	for i = 1, NB_TILE_W, 1 do
 		for j = 1, NB_TILE_H, 1 do
 			 
+			
 			local xT = math.ceil((mario.x + ((i - 1) * TAILLE_TILE)) / TAILLE_TILE) 
 			local yT = math.ceil((mario.y + ((j - 1) * TAILLE_TILE)) / TAILLE_TILE)
 
@@ -983,7 +1006,7 @@ function appliquerLesBoutons(unReseau)
 	end
 
 	-- c'est pour que droit est la prio sur la gauche
-	if lesBoutonsT["P1 Left"] == true and lesBoutonsT["P1 Right"] == true then
+	if lesBoutonsT["P1 Left"] and lesBoutonsT["P1 Right"] then
 		lesBoutonsT["P1 Left"] = false
 	end
 	joypad.set(lesBoutonsT)
@@ -992,7 +1015,7 @@ end
 
 function traitementPause()
 	local lesBoutons = joypad.get(1)
-	if lesBoutons["P1 Start"] == true then
+	if lesBoutons["P1 Start"] then
 		lesBoutons["P1 Start"] = false
 	else
 		lesBoutons["P1 Start"] = true
@@ -1061,7 +1084,7 @@ function dessinerUnReseau(unReseau)
 		local nomT = string.sub(lesBoutons[i].nom, 4)
 		local indice = i + NB_INPUT
 
-		if sigmoid(unReseau.lesNeurones[indice].valeur) == true then
+		if sigmoid(unReseau.lesNeurones[indice].valeur) then
 			gui.drawRectangle(xT, yT, TAILLE_OUTPUT_W, TAILLE_OUTPUT_H, "white", "white")
 		else
 			gui.drawRectangle(xT, yT, TAILLE_OUTPUT_W, TAILLE_OUTPUT_H, "white", "black")
@@ -1176,7 +1199,9 @@ else
 
 	laPopulation = newPopulation() 
 	
-	mutation(laPopulation[1])
+	for i = 1, #laPopulation, 1 do
+		mutation(laPopulation[i])
+	end	
 
 	for i = 2, #laPopulation, 1 do
 		laPopulation[i] = copier(laPopulation[1])
@@ -1194,25 +1219,25 @@ else
 		nettoyer = true
 
 
-		if forms.ischecked(estAccelere) == true then
+		if forms.ischecked(estAccelere) then
 			emu.limitframerate(false)
 		else
 			emu.limitframerate(true)
 		end
 
-		if forms.ischecked(estAfficheReseau) == true then
+		if forms.ischecked(estAfficheReseau) then
 			dessinerUnReseau(laPopulation[idPopulation])
 			nettoyer = false
 		end
 
-		if forms.ischecked(estAfficheInfo) == true then
+		if forms.ischecked(estAfficheInfo) then
 			dessinerLesInfos(laPopulation, lesEspeces, nbGeneration)
 			nettoyer = false
 		end
 
 
 
-		if nettoyer == true then
+		if nettoyer then
 			gui.clearGraphics()
 		end
 
@@ -1252,7 +1277,7 @@ else
 					if not niveauFiniSauvegarde then
 						for i = 1, #laPopulation, 1 do
 							-- le level a été fini une fois, 
-							if laPopulation[i].fitness > FITNESS_LEVEL_FINI then
+							if laPopulation[i].fitness == FITNESS_LEVEL_FINI then
 								sauvegarderPopulation(laPopulation, true)
 								niveauFiniSauvegarde = true
 								console.log("Niveau fini apres " .. nbGeneration .. " generation !")
@@ -1287,11 +1312,3 @@ else
 	end
 	
 end
-
-
-
-
-
-
-
-
